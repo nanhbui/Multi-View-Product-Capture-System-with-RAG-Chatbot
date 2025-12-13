@@ -1,0 +1,47 @@
+# ============================================================================
+# Multi-View Product Data Capture System - Dependencies
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Phase 1: Real-Time Capture System
+# ----------------------------------------------------------------------------
+opencv-python>=4.8.0
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0,<2.0.0
+
+# ----------------------------------------------------------------------------
+# Phase 2: RAG Chatbot & Data Processing
+# ----------------------------------------------------------------------------
+
+# LLM & Embeddings
+openai>=1.0.0
+tiktoken>=0.5.0
+
+# LangChain Framework
+langchain>=0.1.0
+langchain-openai>=0.0.2
+langchain-community>=0.0.10
+langgraph>=0.0.26
+
+# Vector Database
+chromadb>=0.4.0
+
+# MongoDB Database
+pymongo>=4.0.0
+
+# Data Validation
+pydantic>=2.0.0
+
+# Environment & Configuration
+python-dotenv>=1.0.0
+
+# External Search (Optional)
+tavily-python
+
+# ----------------------------------------------------------------------------
+# Utilities
+# ----------------------------------------------------------------------------
+requests>=2.31.0
+tqdm>=4.66.0
