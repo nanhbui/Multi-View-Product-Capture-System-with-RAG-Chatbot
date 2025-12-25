@@ -373,17 +373,16 @@ def register_plugin():
 
     This function should be called to make the plugin available to GStreamer.
     """
+    # Register the type with GObject
+    GObject.type_register(GstYoloInference)
+
+    # Register as GStreamer plugin
     return Gst.Plugin.register_static(
         Gst.VERSION_MAJOR,
         Gst.VERSION_MINOR,
         'yoloinference',
         'YOLO inference plugin for GStreamer',
-        lambda plugin: plugin.register_type(
-            GstYoloInference,
-            'yoloinference',
-            0,
-            GstYoloInference
-        ),
+        lambda plugin: True,  # Plugin init function
         '1.0',
         'MIT',
         'Product Capture System',
