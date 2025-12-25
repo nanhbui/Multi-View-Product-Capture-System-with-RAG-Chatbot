@@ -18,27 +18,6 @@ except ImportError:
     GSTSHARK_AVAILABLE = False
     print("[INFO] GstShark profiler not available. Install for performance monitoring.")
 
-# Import GStreamer YOLO plugin (optional)
-try:
-    import gi
-    gi.require_version('Gst', '1.0')
-    from gi.repository import Gst, GLib
-    from modules.gst_yolo_inference import register_plugin
-
-    # Initialize GStreamer
-    Gst.init(None)
-
-    # Register plugin
-    if register_plugin():
-        GST_PLUGIN_AVAILABLE = True
-        print("[SUCCESS] GStreamer YOLO plugin registered")
-    else:
-        GST_PLUGIN_AVAILABLE = False
-        print("[WARNING] GStreamer YOLO plugin registration failed")
-except (ImportError, Exception) as e:
-    GST_PLUGIN_AVAILABLE = False
-    print(f"[INFO] GStreamer plugin not available: {e}")
-
 
 # State Machine States
 class CaptureState(Enum):
