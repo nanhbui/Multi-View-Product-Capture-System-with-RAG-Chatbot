@@ -9,6 +9,15 @@ import json
 from datetime import datetime
 from enum import Enum
 import pymongo
+import os
+
+# Import GstShark profiler (optional)
+try:
+    from modules.gstshark_profiler import GstSharkProfiler
+    GSTSHARK_AVAILABLE = True
+except ImportError:
+    GSTSHARK_AVAILABLE = False
+    print("[INFO] GstShark profiler not available. Install for performance monitoring.")
 
 
 # State Machine States
@@ -39,10 +48,11 @@ class CaptureSystem:
         min_bbox_area: int = 10000,
         camera_id: int = 0,
         output_dir: str = "captured_images",
-        model_name: str = "yolov8n.pt",
+        model_name: str = "yolov8n-seg.pt",  # Changed to segmentation model
 
-        mongo_uri: str = "mongodb://localhost:27017/", 
-        db_name: str = "product_capture_db"
+        mongo_uri: str = "mongodb://localhost:27017/",
+        db_name: str = "product_capture_db",
+        enable_profiling: bool = False
     ):
         """
         Initialize the capture system.
@@ -78,11 +88,28 @@ class CaptureSystem:
         self.review_frame = None
         self.review_bbox = None
         self.review_detection_info = None
+        self.review_mask = None  # Store segmentation mask
         self.recommendations = []
+
+        # Histogram and lighting analysis
+        self.current_histogram = None
+        self.gamma_corrected = False
 
         # Close button state
         self.close_button_rect = None  # Will store (x1, y1, x2, y2)
         self.close_button_hovered = False
+
+        # GstShark profiling
+        self.enable_profiling = enable_profiling
+        self.profiler = None
+        if self.enable_profiling and GSTSHARK_AVAILABLE:
+            self.profiler = GstSharkProfiler(
+                output_dir=f"{output_dir}/gstshark_logs",
+                auto_start=True
+            )
+            print("[INFO] GstShark profiling enabled")
+        elif self.enable_profiling and not GSTSHARK_AVAILABLE:
+            print("[WARNING] Profiling requested but GstShark not available")
 
         print("[INFO] Connecting to MongoDB...")
         try:
@@ -242,12 +269,13 @@ class CaptureSystem:
 
         return recs
 
-    def get_largest_detection(self, results) -> Optional[Tuple[List[float], int, float]]:
+    def get_largest_detection(self, results) -> Optional[Tuple[List[float], int, float, Optional[np.ndarray]]]:
         """
         Extract the largest detected object from YOLO results.
 
         Returns:
-            Tuple of (bbox, track_id, confidence) or None if no detection
+            Tuple of (bbox, track_id, confidence, mask) or None if no detection
+            mask is None if using non-segmentation model
         """
         if not results or not results[0].boxes:
             return None
@@ -271,7 +299,87 @@ class CaptureSystem:
         track_id = int(largest_box.id.cpu().numpy()[0]) if largest_box.id is not None else -1
         confidence = float(largest_box.conf.cpu().numpy()[0])
 
-        return bbox, track_id, confidence
+        # Extract segmentation mask if available
+        mask = None
+        if hasattr(results[0], 'masks') and results[0].masks is not None:
+            masks = results[0].masks
+            if len(masks.data) > largest_idx:
+                # Get mask for the largest detection
+                mask_data = masks.data[largest_idx].cpu().numpy()
+                # Resize mask to original image size
+                mask = cv2.resize(mask_data, (results[0].orig_shape[1], results[0].orig_shape[0]))
+                # Convert to binary mask (0-255)
+                mask = (mask * 255).astype(np.uint8)
+
+        return bbox, track_id, confidence, mask
+
+    def calculate_histogram(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Calculate histogram of the grayscale image.
+
+        Args:
+            frame: Input BGR frame
+
+        Returns:
+            Histogram array
+        """
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+        return hist
+
+    def analyze_lighting(self, frame: np.ndarray, hist: np.ndarray = None) -> Dict[str, Any]:
+        """
+        Analyze lighting conditions from histogram.
+
+        Args:
+            frame: Input frame
+            hist: Pre-calculated histogram (optional)
+
+        Returns:
+            Dictionary with lighting analysis results
+        """
+        if hist is None:
+            hist = self.calculate_histogram(frame)
+
+        # Calculate mean brightness
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        mean_brightness = np.mean(gray)
+
+        # Analyze histogram distribution
+        total_pixels = frame.shape[0] * frame.shape[1]
+        dark_pixels = np.sum(hist[:85]) / total_pixels  # Pixels in 0-84 range
+        bright_pixels = np.sum(hist[170:]) / total_pixels  # Pixels in 170-255 range
+
+        is_dark = mean_brightness < 80
+        is_bright = mean_brightness > 180
+        needs_gamma = dark_pixels > 0.4  # More than 40% dark pixels
+
+        return {
+            "mean_brightness": mean_brightness,
+            "dark_pixels_ratio": dark_pixels,
+            "bright_pixels_ratio": bright_pixels,
+            "is_dark": is_dark,
+            "is_bright": is_bright,
+            "needs_gamma_correction": needs_gamma
+        }
+
+    def apply_gamma_correction(self, frame: np.ndarray, gamma: float = 1.5) -> np.ndarray:
+        """
+        Apply gamma correction to brighten dark images.
+
+        Args:
+            frame: Input frame
+            gamma: Gamma value (>1 brightens, <1 darkens)
+
+        Returns:
+            Gamma corrected frame
+        """
+        # Build lookup table
+        inv_gamma = 1.0 / gamma
+        table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in range(256)]).astype("uint8")
+
+        # Apply gamma correction using lookup table
+        return cv2.LUT(frame, table)
 
     def save_image_and_metadata(
             self,
@@ -280,16 +388,35 @@ class CaptureSystem:
             bbox: List[float],
             track_id: int,
             confidence: float,
-            recommendations: List[str]
+            recommendations: List[str],
+            mask: Optional[np.ndarray] = None
         ) -> Dict[str, str]:
             """
-            Save image locally and detailed metadata to both JSON file and MongoDB.
+            Save image locally (with transparency if mask available) and detailed metadata
+            to both JSON file and MongoDB.
             MongoDB stores ONLY metadata, NOT images.
             """
-            # 1. Save image locally (e.g., captured_images/20231206_143022/angle_1.jpg)
-            image_filename = f"angle_{angle_num}.jpg"
-            image_path = self.session_dir / image_filename
-            cv2.imwrite(str(image_path), frame)
+            # 1. Save image locally with transparency if mask is available
+            if mask is not None:
+                # Save as transparent PNG with alpha channel
+                image_filename = f"angle_{angle_num}.png"
+                image_path = self.session_dir / image_filename
+
+                # Create BGRA image (BGR + Alpha channel)
+                bgra = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+                bgra[:, :, 3] = mask  # Set alpha channel to mask
+
+                cv2.imwrite(str(image_path), bgra)
+
+                # Also save the mask separately for reference
+                mask_filename = f"angle_{angle_num}_mask.png"
+                mask_path = self.session_dir / mask_filename
+                cv2.imwrite(str(mask_path), mask)
+            else:
+                # Save as regular JPEG if no mask
+                image_filename = f"angle_{angle_num}.jpg"
+                image_path = self.session_dir / image_filename
+                cv2.imwrite(str(image_path), frame)
 
             # Get image dimensions for metadata
             img_height, img_width = frame.shape[:2]
@@ -311,8 +438,10 @@ class CaptureSystem:
                     "local_path": str(image_path),
                     "width": img_width,
                     "height": img_height,
-                    "format": "JPEG",
-                    "color_space": "BGR"
+                    "format": "PNG" if mask is not None else "JPEG",
+                    "color_space": "BGRA" if mask is not None else "BGR",
+                    "has_transparency": mask is not None,
+                    "mask_file": f"angle_{angle_num}_mask.png" if mask is not None else None
                 },
 
                 # Object detection information
@@ -450,17 +579,51 @@ class CaptureSystem:
 
         return thumb_square
 
+    def draw_histogram(self, dashboard: np.ndarray, hist: np.ndarray, x: int, y: int, w: int = 200, h: int = 100) -> None:
+        """
+        Draw histogram visualization on the dashboard.
+
+        Args:
+            dashboard: Dashboard image to draw on
+            hist: Histogram data
+            x, y: Top-left position
+            w, h: Width and height of histogram display
+        """
+        # Normalize histogram
+        hist_normalized = cv2.normalize(hist, None, 0, h, cv2.NORM_MINMAX)
+
+        # Draw black background
+        cv2.rectangle(dashboard, (x, y), (x + w, y + h), (20, 20, 20), -1)
+        cv2.rectangle(dashboard, (x, y), (x + w, y + h), (100, 100, 100), 1)
+
+        # Draw histogram bars
+        bin_w = w / 256
+        for i in range(256):
+            bin_h = int(hist_normalized[i])
+            # Color gradient from dark to bright
+            color_val = i
+            color = (color_val // 2, color_val // 2, color_val)
+            cv2.line(dashboard,
+                    (int(x + i * bin_w), y + h),
+                    (int(x + i * bin_w), y + h - bin_h),
+                    color, 1)
+
+        # Add title
+        cv2.putText(dashboard, "Histogram", (x, y - 5),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
     def draw_ui(
             self,
             camera_frame: np.ndarray,
             detection_info: Optional[Tuple] = None,
-            live_recommendations: Optional[List[str]] = None
+            live_recommendations: Optional[List[str]] = None,
+            lighting_analysis: Optional[Dict[str, Any]] = None
         ) -> np.ndarray:
-            h, w = camera_frame.shape[:2]  
-            
+            h, w = camera_frame.shape[:2]
+
             # --- CẤU HÌNH UI ĐỘNG (RESPONSIVE) ---
             # Sidebar chiếm 1/3 chiều rộng tổng (hoặc cố định khoảng 350-400px)
-            sidebar_w = 420 
+            sidebar_w = 420
             total_w = w + sidebar_w
             
             # Tính toán kích thước thumbnail dựa trên chiều cao màn hình
@@ -475,16 +638,63 @@ class CaptureSystem:
             # 1. Vẽ Camera
             dashboard[0:h, 0:w] = camera_frame
 
-            # Vẽ bbox trên camera
+            # Vẽ bbox và mask trên camera
             if detection_info:
-                bbox, track_id, conf = detection_info
+                # Unpack detection info (now includes mask)
+                if len(detection_info) == 4:
+                    bbox, track_id, conf, mask = detection_info
+                else:
+                    bbox, track_id, conf = detection_info
+                    mask = None
+
                 x1, y1, x2, y2 = map(int, bbox)
+
+                # Draw segmentation mask overlay if available
+                if mask is not None:
+                    # Create colored overlay
+                    overlay = dashboard[0:h, 0:w].copy()
+                    mask_resized = cv2.resize(mask, (w, h))
+                    mask_bool = mask_resized > 127
+                    overlay[mask_bool] = overlay[mask_bool] * 0.6 + np.array([0, 255, 0]) * 0.4
+                    dashboard[0:h, 0:w] = overlay.astype(np.uint8)
+
+                # Draw bounding box
                 cv2.rectangle(dashboard, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
                 # Label gọn gàng
                 label = f"ID:{track_id} {conf:.2f}"
                 t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
                 cv2.rectangle(dashboard, (x1, y1-25), (x1+t_size[0], y1), (0,255,0), -1)
                 cv2.putText(dashboard, label, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 2)
+
+            # Draw histogram in top-left corner of camera view
+            if self.current_histogram is not None:
+                hist_x, hist_y = 10, 10
+                self.draw_histogram(dashboard, self.current_histogram, hist_x, hist_y, 200, 100)
+
+                # Draw lighting analysis below histogram
+                if lighting_analysis is not None:
+                    text_y = hist_y + 120
+                    brightness = lighting_analysis["mean_brightness"]
+
+                    # Brightness indicator
+                    brightness_text = f"Brightness: {brightness:.0f}"
+                    cv2.putText(dashboard, brightness_text, (hist_x, text_y),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+                    # Warning/recommendation based on lighting
+                    if lighting_analysis["is_dark"]:
+                        cv2.putText(dashboard, "! TOO DARK - Turn on light", (hist_x, text_y + 20),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                    elif lighting_analysis["needs_gamma_correction"]:
+                        cv2.putText(dashboard, "! Low light detected", (hist_x, text_y + 20),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 1)
+                    elif lighting_analysis["is_bright"]:
+                        cv2.putText(dashboard, "! TOO BRIGHT - Reduce light", (hist_x, text_y + 20),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                    else:
+                        cv2.putText(dashboard, "✓ Good lighting", (hist_x, text_y + 20),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
             # 2. Vẽ Sidebar Background
             cv2.rectangle(dashboard, (w, 0), (total_w, h), (30, 30, 30), -1)
@@ -631,26 +841,38 @@ class CaptureSystem:
                         print("[ERROR] Failed to read frame from camera")
                         break
 
+                    # Calculate histogram and analyze lighting
+                    self.current_histogram = self.calculate_histogram(frame)
+                    lighting_analysis = self.analyze_lighting(frame, self.current_histogram)
+
+                    # Apply gamma correction if needed
+                    display_frame = frame
+                    if lighting_analysis["needs_gamma_correction"]:
+                        display_frame = self.apply_gamma_correction(frame, gamma=1.5)
+                        self.gamma_corrected = True
+                    else:
+                        self.gamma_corrected = False
+
                     # Run YOLO tracking
                     results = self.model.track(
-                        frame,
+                        display_frame,
                         persist=True,
                         tracker="bytetrack.yaml",
                         verbose=False
                     )
 
-                    # Get largest detection
+                    # Get largest detection (now includes mask)
                     detection = self.get_largest_detection(results)
 
                     # Generate live recommendations for real-time feedback
                     live_recs = None
                     if detection is not None:
-                        bbox, track_id, confidence = detection
-                        live_recs = self.generate_recommendations(frame, bbox)
+                        bbox, track_id, confidence, mask = detection
+                        live_recs = self.generate_recommendations(display_frame, bbox)
 
-                    # Draw UI with live recommendations
-                    display_frame = self.draw_ui(frame, detection, live_recs)
-                    cv2.imshow("Product Capture System", display_frame)
+                    # Draw UI with live recommendations and lighting analysis
+                    ui_frame = self.draw_ui(display_frame, detection, live_recs, lighting_analysis)
+                    cv2.imshow("Product Capture System", ui_frame)
 
                     # Handle keyboard
                     key = cv2.waitKey(1) & 0xFF
@@ -664,15 +886,16 @@ class CaptureSystem:
                             print("[WARNING] No object detected! Please ensure object is visible.")
                             continue
 
-                        bbox, track_id, confidence = detection
+                        bbox, track_id, confidence, mask = detection
 
                         # Generate recommendations
-                        self.recommendations = self.generate_recommendations(frame, bbox)
+                        self.recommendations = self.generate_recommendations(display_frame, bbox)
 
-                        # Store review data
-                        self.review_frame = frame.copy()
+                        # Store review data (use gamma-corrected frame if applied)
+                        self.review_frame = display_frame.copy()
                         self.review_bbox = bbox
                         self.review_detection_info = detection
+                        self.review_mask = mask  # Store the segmentation mask
 
                         # Switch to REVIEW state
                         self.state = CaptureState.REVIEWING
@@ -690,16 +913,17 @@ class CaptureSystem:
                         break
 
                     elif key == 13:  # ENTER key - Keep photo and continue
-                        bbox, track_id, confidence = self.review_detection_info
+                        bbox, track_id, confidence, mask = self.review_detection_info
 
-                        # Save image and metadata to subfolder
+                        # Save image and metadata to subfolder (with mask for transparency)
                         save_result = self.save_image_and_metadata(
                             self.review_frame,
                             self.current_angle,
                             bbox,
                             track_id,
                             confidence,
-                            self.recommendations
+                            self.recommendations,
+                            mask=self.review_mask
                         )
 
                         # Create thumbnail
@@ -779,8 +1003,23 @@ class CaptureSystem:
 
     def cleanup(self) -> None:
         """
-        Clean up resources (camera, windows, etc.).
+        Clean up resources (camera, windows, profiler, etc.).
         """
+        # Stop profiling and generate report
+        if self.profiler is not None:
+            print("[INFO] Stopping profiler and generating report...")
+            self.profiler.stop_monitoring()
+            report = self.profiler.generate_report()
+            self.profiler.stop_profiling()
+
+            # Save performance summary to session directory
+            if report:
+                perf_summary_file = self.session_dir / "performance_summary.json"
+                import json
+                with open(perf_summary_file, 'w') as f:
+                    json.dump(report, f, indent=2)
+                print(f"[INFO] Performance summary saved to: {perf_summary_file}")
+
         if self.cap is not None:
             self.cap.release()
         cv2.destroyAllWindows()
@@ -817,7 +1056,10 @@ def main():
     MIN_BBOX_AREA = 10000
     CAMERA_ID = 0
     OUTPUT_DIR = "captured_images"
-    MODEL_NAME = "yolov8n.pt"
+    MODEL_NAME = "yolov8n-seg.pt"  # Using segmentation model for background removal
+
+    # Performance profiling (set to True to enable GstShark profiling)
+    ENABLE_PROFILING = os.getenv("ENABLE_GSTSHARK_PROFILING", "false").lower() == "true"
 
     # Create and run the capture system
     try:
@@ -826,8 +1068,13 @@ def main():
             min_bbox_area=MIN_BBOX_AREA,
             camera_id=CAMERA_ID,
             output_dir=OUTPUT_DIR,
-            model_name=MODEL_NAME
+            model_name=MODEL_NAME,
+            enable_profiling=ENABLE_PROFILING
         )
+
+        # Attach profiler to current process if enabled
+        if capture_system.profiler is not None:
+            capture_system.profiler.attach_to_pipeline(os.getpid())
 
         capture_system.run()
 

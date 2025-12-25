@@ -1,0 +1,174 @@
+{
+  "session_id": "20251223_134144",
+  "created_at": "2025-12-23T13:42:12.075535",
+  "session_info": {
+    "total_angles": 3,
+    "output_directory": "captured_images/20251223_134144",
+    "status": "completed",
+    "captured_count": 3,
+    "completion_percentage": 100.0
+  },
+  "captures": {
+    "1": {
+      "session_id": "20251223_134144",
+      "angle_number": 1,
+      "timestamp": "2025-12-23T13:42:12.075481",
+      "image": {
+        "filename": "angle_1.png",
+        "local_path": "captured_images/20251223_134144/angle_1.png",
+        "width": 1280,
+        "height": 720,
+        "format": "PNG",
+        "color_space": "BGRA",
+        "has_transparency": true,
+        "mask_file": "angle_1_mask.png"
+      },
+      "detection": {
+        "track_id": 1,
+        "confidence": 0.8464701175689697,
+        "confidence_percentage": "84.6%",
+        "bounding_box": {
+          "x1": 371.690673828125,
+          "y1": 151.06768798828125,
+          "x2": 1152.8623046875,
+          "y2": 710.8158569335938,
+          "width": 781.171630859375,
+          "height": 559.7481689453125,
+          "area_pixels": 437259.39000555873,
+          "center_x": 762.2764892578125,
+          "center_y": 430.9417724609375
+        }
+      },
+      "quality_assessment": {
+        "overall_status": "warning",
+        "has_warnings": true,
+        "is_excellent": false,
+        "recommendations": [
+          "\u26a0 SLIGHTLY BLURRY: Try to hold steadier",
+          "\u26a0 TOO LARGE: Move camera farther"
+        ],
+        "recommendation_count": 2,
+        "issues_detected": [
+          "\u26a0 SLIGHTLY BLURRY: Try to hold steadier",
+          "\u26a0 TOO LARGE: Move camera farther"
+        ],
+        "passed_checks": []
+      },
+      "chatbot_summary": {
+        "description": "Angle 1 of 3 captured",
+        "quality": "warning",
+        "confidence_level": "high",
+        "needs_review": true,
+        "ready_for_processing": false
+      }
+    },
+    "2": {
+      "session_id": "20251223_134144",
+      "angle_number": 2,
+      "timestamp": "2025-12-23T13:42:12.519121",
+      "image": {
+        "filename": "angle_2.png",
+        "local_path": "captured_images/20251223_134144/angle_2.png",
+        "width": 1280,
+        "height": 720,
+        "format": "PNG",
+        "color_space": "BGRA",
+        "has_transparency": true,
+        "mask_file": "angle_2_mask.png"
+      },
+      "detection": {
+        "track_id": 1,
+        "confidence": 0.8391649723052979,
+        "confidence_percentage": "83.9%",
+        "bounding_box": {
+          "x1": 374.7604064941406,
+          "y1": 150.29440307617188,
+          "x2": 1158.637939453125,
+          "y2": 711.6331787109375,
+          "width": 783.8775329589844,
+          "height": 561.3387756347656,
+          "area_pixels": 440020.8545987969,
+          "center_x": 766.6991729736328,
+          "center_y": 430.9637908935547
+        }
+      },
+      "quality_assessment": {
+        "overall_status": "warning",
+        "has_warnings": true,
+        "is_excellent": false,
+        "recommendations": [
+          "\u26a0 SLIGHTLY BLURRY: Try to hold steadier",
+          "\u26a0 TOO LARGE: Move camera farther"
+        ],
+        "recommendation_count": 2,
+        "issues_detected": [
+          "\u26a0 SLIGHTLY BLURRY: Try to hold steadier",
+          "\u26a0 TOO LARGE: Move camera farther"
+        ],
+        "passed_checks": []
+      },
+      "chatbot_summary": {
+        "description": "Angle 2 of 3 captured",
+        "quality": "warning",
+        "confidence_level": "high",
+        "needs_review": true,
+        "ready_for_processing": false
+      }
+    },
+    "3": {
+      "session_id": "20251223_134144",
+      "angle_number": 3,
+      "timestamp": "2025-12-23T13:42:12.938069",
+      "image": {
+        "filename": "angle_3.png",
+        "local_path": "captured_images/20251223_134144/angle_3.png",
+        "width": 1280,
+        "height": 720,
+        "format": "PNG",
+        "color_space": "BGRA",
+        "has_transparency": true,
+        "mask_file": "angle_3_mask.png"
+      },
+      "detection": {
+        "track_id": 1,
+        "confidence": 0.8561127781867981,
+        "confidence_percentage": "85.6%",
+        "bounding_box": {
+          "x1": 374.2980651855469,
+          "y1": 147.59902954101562,
+          "x2": 1161.2034912109375,
+          "y2": 711.3265380859375,
+          "width": 786.9054260253906,
+          "height": 563.7275085449219,
+          "area_pixels": 443600.2352737738,
+          "center_x": 767.7507781982422,
+          "center_y": 429.46278381347656
+        }
+      },
+      "quality_assessment": {
+        "overall_status": "warning",
+        "has_warnings": true,
+        "is_excellent": false,
+        "recommendations": [
+          "\u26a0 SLIGHTLY BLURRY: Try to hold steadier",
+          "\u26a0 TOO LARGE: Move camera farther"
+        ],
+        "recommendation_count": 2,
+        "issues_detected": [
+          "\u26a0 SLIGHTLY BLURRY: Try to hold steadier",
+          "\u26a0 TOO LARGE: Move camera farther"
+        ],
+        "passed_checks": []
+      },
+      "chatbot_summary": {
+        "description": "Angle 3 of 3 captured",
+        "quality": "warning",
+        "confidence_level": "high",
+        "needs_review": true,
+        "ready_for_processing": false
+      }
+    }
+  },
+  "last_updated": "2025-12-23T13:42:12.938224",
+  "completed_at": "2025-12-23T13:42:12.938230"
+}
