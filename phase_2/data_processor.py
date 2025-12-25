@@ -100,24 +100,7 @@ class DataProcessor:
         self,
         angle_metadata_list: List[Dict[str, Any]]
     ) -> MVVResult:
-        """
-        Simulated Multi-View Verification (MVV) algorithm.
 
-        This function validates consistency across multiple captured angles
-        and generates a consolidated summary for RAG retrieval.
-
-        In a production system, this would include:
-        - Feature matching across angles
-        - 3D reconstruction validation
-        - Lighting consistency checks
-        - Object identity verification
-
-        Args:
-            angle_metadata_list: List of angle metadata dictionaries
-
-        Returns:
-            MVVResult object with verification results
-        """
         print(f"[INFO] Running Multi-View Verification on {len(angle_metadata_list)} angles...")
 
         # Simulate MVV processing

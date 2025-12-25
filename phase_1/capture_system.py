@@ -3,7 +3,6 @@ import numpy as np
 from ultralytics import YOLO
 from pathlib import Path
 from typing import Tuple, Optional, List, Dict, Any
-import random
 import sys
 import json
 from datetime import datetime

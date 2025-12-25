@@ -1,12 +1,3 @@
-"""
-Image processing module for advanced operations.
-
-This module provides:
-- GrabCut background segmentation
-- SIFT feature matching for multi-view alignment
-- Super-resolution enhancement
-- Background removal using segmentation masks
-"""
 
 import cv2
 import numpy as np

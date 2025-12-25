@@ -1,17 +1,3 @@
-"""
-GstShark Performance Profiling Module
-
-This module integrates GstShark performance monitoring with the capture system
-to analyze GStreamer pipeline performance, including:
-- Frame processing time
-- FPS (Frames Per Second)
-- Latency measurements
-- CPU usage per element
-- Memory usage
-- Buffer flow analysis
-
-GstShark documentation: https://developer.ridgerun.com/wiki/index.php/GstShark
-"""
 
 import os
 import re

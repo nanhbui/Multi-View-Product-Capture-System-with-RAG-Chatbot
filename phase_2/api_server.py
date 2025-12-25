@@ -1,16 +1,3 @@
-"""
-FastAPI Server for Product RAG Chatbot
-
-This module provides a REST API interface for:
-1. Processing captured product sessions
-2. Querying products via natural language
-3. Managing vector store
-4. Health checks and system status
-
-Usage:
-    uvicorn phase_2.api_server:app --reload
-    Or: uv run uvicorn phase_2.api_server:app --host 0.0.0.0 --port 8000
-"""
 
 import os
 import sys
