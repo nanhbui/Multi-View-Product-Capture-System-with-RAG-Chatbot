@@ -3,13 +3,17 @@
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# Phase 1: Real-Time Capture System
+# Phase 1: Real-Time Capture System with GStreamer Integration
 # ----------------------------------------------------------------------------
 opencv-python>=4.8.0
 ultralytics>=8.0.0
 torch>=2.0.0
 torchvision>=0.15.0
 numpy>=1.24.0,<2.0.0
+
+# GStreamer Python bindings (install via system package manager)
+# Ubuntu/Debian: sudo apt-get install python3-gi gstreamer1.0-tools gstreamer1.0-plugins-*
+# pygobject>=3.42.0  # Usually installed via system packages
 
 # ----------------------------------------------------------------------------
 # Phase 2: RAG Chatbot & Data Processing

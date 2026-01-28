@@ -18,26 +18,13 @@ except ImportError:
     GSTSHARK_AVAILABLE = False
     print("[INFO] GstShark profiler not available. Install for performance monitoring.")
 
-# Import GStreamer YOLO plugin (optional)
+# Import GStreamer integration (optional)
 try:
-    import gi
-    gi.require_version('Gst', '1.0')
-    from gi.repository import Gst, GLib
-    from modules.gst_yolo_inference import register_plugin
-
-    # Initialize GStreamer
-    Gst.init(None)
-
-    # Register plugin
-    if register_plugin():
-        GST_PLUGIN_AVAILABLE = True
-        print("[SUCCESS] GStreamer YOLO plugin registered")
-    else:
-        GST_PLUGIN_AVAILABLE = False
-        print("[WARNING] GStreamer YOLO plugin registration failed")
-except (ImportError, Exception) as e:
-    GST_PLUGIN_AVAILABLE = False
-    print(f"[INFO] GStreamer plugin not available: {e}")
+    from modules.gstreamer_integration import GStreamerCapture, GStreamerIntegrationMixin
+    GSTREAMER_AVAILABLE = True
+except ImportError:
+    GSTREAMER_AVAILABLE = False
+    print("[INFO] GStreamer integration not available. Using OpenCV fallback.")
 
 
 # State Machine States
@@ -51,15 +38,18 @@ class CaptureSystem:
     """
     Real-time multi-angle product capture system with object tracking and IQA.
 
-    This system uses GStreamer for robust video streaming, YOLOv8 for object
-    detection and tracking, and a simulated IQA module to ensure image quality.
+    This system supports both GStreamer (with YOLO plugin) and OpenCV capture modes
+    for robust video streaming, YOLOv8 object detection, and quality assessment.
 
     Features:
+    - GStreamer integration with real-time YOLO inference
+    - OpenCV fallback for maximum compatibility
     - Separate subfolders for each captured image
     - 2/3 screen camera feed with side panel
     - Persistent thumbnail display
     - Review mode with quality recommendations
     - Final summary with retake options
+    - Performance monitoring and profiling
     """
 
     def __init__(
@@ -69,10 +59,10 @@ class CaptureSystem:
         camera_id: int = 0,
         output_dir: str = "captured_images",
         model_name: str = "yolov8n-seg.pt",  # Changed to segmentation model
-
         mongo_uri: str = "mongodb://localhost:27017/",
         db_name: str = "product_capture_db",
-        enable_profiling: bool = False
+        enable_profiling: bool = False,
+        use_gstreamer: bool = True
     ):
         """
         Initialize the capture system.
@@ -82,12 +72,17 @@ class CaptureSystem:
             min_bbox_area: Minimum bounding box area for quality assessment
             camera_id: Camera device ID (default: 0)
             output_dir: Directory to save captured images
-            model_name: YOLOv8 model name (default: yolov8n.pt for lightweight)
+            model_name: YOLOv8 model name (default: yolov8n-seg.pt for segmentation)
+            mongo_uri: MongoDB connection string
+            db_name: MongoDB database name
+            enable_profiling: Enable GstShark profiling
+            use_gstreamer: Prefer GStreamer over OpenCV (if available)
         """
         self.total_angles = total_angles
         self.min_bbox_area = min_bbox_area
         self.camera_id = camera_id
         self.model_name = model_name
+        self.use_gstreamer = use_gstreamer and GSTREAMER_AVAILABLE
 
         # Generate session ID
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -152,62 +147,87 @@ class CaptureSystem:
 
     def _initialize_camera(self) -> None:
         """
-        Khởi tạo camera ưu tiên GStreamer (MJPG) để đạt FPS cao.
+        Initialize camera with GStreamer or OpenCV based on availability.
         """
-        print("[INFO] Initializing camera...")
+        print("[INFO] Initializing capture system...")
+        
+        if self.use_gstreamer:
+            print("[INFO] Attempting GStreamer capture with YOLO integration...")
+            self.gst_capture = GStreamerCapture(
+                camera_id=self.camera_id,
+                model_path=self.model_name,
+                confidence=0.25,
+                width=1280,
+                height=720
+            )
+            
+            if self.gst_capture.initialize():
+                self.cap = None  # GStreamer handles video capture
+                self.model = None  # YOLO runs in GStreamer pipeline
+                print("[SUCCESS] GStreamer capture initialized")
+                return
+            else:
+                print("[WARNING] GStreamer failed, falling back to OpenCV")
+                self.use_gstreamer = False
+        
+        # OpenCV fallback
+        print("[INFO] Using OpenCV capture mode...")
+        self._initialize_camera_opencv()
+
+    def _initialize_camera_opencv(self) -> None:
+        """
+        Initialize camera with OpenCV (fallback mode).
+        """
+        print("[INFO] Initializing OpenCV camera...")
         self.cap = None
-        
-        # Thử các ID phổ biến
+
+        # Try common camera IDs
         camera_ids = [self.camera_id, 0, 2, 1]
-        
-        # Cấu hình mong muốn: 1280x720 (HD)
+
+        # Desired configuration: 1280x720 HD @ 30fps
         w, h, fps = 1280, 720, 30
 
         for cam_id in camera_ids:
-            # --- PIPELINE GSTREAMER (FIXED) ---
-            # Quan trọng: Request image/jpeg (MJPG) thay vì video/x-raw
+            # Try GStreamer MJPEG pipeline (best performance)
             gst_pipeline = (
                 f"v4l2src device=/dev/video{cam_id} ! "
                 f"image/jpeg, width={w}, height={h}, framerate={fps}/1 ! "
                 "jpegdec ! videoconvert ! appsink"
             )
 
-            print(f"[INFO] Trying /dev/video{cam_id} with GStreamer (MJPG)...")
+            print(f"[INFO] Trying /dev/video{cam_id} with GStreamer backend...")
             try:
                 self.cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
                 if self.cap.isOpened():
-                    # Đọc thử 1 frame để chắc chắn pipeline chạy
                     ret, _ = self.cap.read()
                     if ret:
-                        print(f"[SUCCESS] GStreamer Pipeline Active on /dev/video{cam_id}")
+                        print(f"[SUCCESS] OpenCV+GStreamer active on /dev/video{cam_id}")
                         self.camera_id = cam_id
                         return
             except Exception as e:
-                print(f"[WARN] GStreamer error: {e}")
+                print(f"[WARN] OpenCV+GStreamer error: {e}")
 
             # --- FALLBACK V4L2 ---
-            # Nếu GStreamer tạch, dùng V4L2 chuẩn
             if self.cap: self.cap.release()
-            print(f"[INFO] Trying /dev/video{cam_id} with standard V4L2...")
+            print(f"[INFO] Trying /dev/video{cam_id} with V4L2...")
             self.cap = cv2.VideoCapture(cam_id, cv2.CAP_V4L2)
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-            
+
             if self.cap.isOpened():
-                ret, frame = self.cap.read()
+                ret, _ = self.cap.read()
                 if ret:
                     real_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                     real_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     print(f"[SUCCESS] V4L2 Camera working: {real_w}x{real_h}")
                     self.camera_id = cam_id
                     return
-        
+
         raise RuntimeError("No working camera found!")
 
     def _initialize_yolo(self) -> None:
         """
-        Initialize YOLOv8 model with tracking capabilities.
-        Downloads the model if not already present.
+        Initialize YOLOv8 model with tracking and segmentation capabilities.
         """
         try:
             print(f"[INFO] Loading YOLOv8 model: {self.model_name}")
@@ -619,7 +639,7 @@ class CaptureSystem:
         # Draw histogram bars
         bin_w = w / 256
         for i in range(256):
-            bin_h = int(hist_normalized[i])
+            bin_h = int(hist_normalized[i].item())  # Fix NumPy deprecation warning
             # Color gradient from dark to bright
             color_val = i
             color = (color_val // 2, color_val // 2, color_val)
@@ -855,43 +875,72 @@ class CaptureSystem:
         try:
             while True:
                 if self.state == CaptureState.CAPTURING:
-                    # Read frame from camera
-                    ret, frame = self.cap.read()
-                    if not ret:
-                        print("[ERROR] Failed to read frame from camera")
-                        break
+                    # Read frame with detections
+                    if self.use_gstreamer:
+                        ret, frame, detections = self.gst_capture.read_frame()
+                        if not ret or frame is None:
+                            print("[ERROR] Failed to read frame from GStreamer")
+                            break
+                        # Convert RGB to BGR for OpenCV display
+                        display_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                        
+                        # Extract YOLO results format for compatibility
+                        if detections:
+                            # Create mock results object for existing code compatibility
+                            results = self._create_mock_results(detections, display_frame.shape)
+                        else:
+                            results = None
+                    else:
+                        # OpenCV mode - read frame from camera
+                        ret, frame = self.cap.read()
+                        if not ret:
+                            print("[ERROR] Failed to read frame from camera")
+                            break
+                        display_frame = frame
+
+                        # Run YOLO tracking
+                        results = self.model.track(
+                            display_frame,
+                            persist=True,
+                            tracker="bytetrack.yaml",
+                            conf=0.25,
+                            iou=0.45,
+                            verbose=False
+                        )[0]
 
                     # Calculate histogram and analyze lighting
-                    self.current_histogram = self.calculate_histogram(frame)
-                    lighting_analysis = self.analyze_lighting(frame, self.current_histogram)
+                    self.current_histogram = self.calculate_histogram(display_frame)
+                    lighting_analysis = self.analyze_lighting(display_frame, self.current_histogram)
 
                     # Apply gamma correction if needed
-                    display_frame = frame
                     if lighting_analysis["needs_gamma_correction"]:
-                        display_frame = self.apply_gamma_correction(frame, gamma=1.5)
+                        display_frame = self.apply_gamma_correction(display_frame, gamma=1.5)
                         self.gamma_corrected = True
                     else:
                         self.gamma_corrected = False
 
-                    # Run YOLO tracking
-                    results = self.model.track(
-                        display_frame,
-                        persist=True,
-                        tracker="bytetrack.yaml",
-                        verbose=False
-                    )
-
-                    # Get largest detection (now includes mask)
+                    # Get largest detection (includes mask)
                     detection = self.get_largest_detection(results)
+
+                    # Update frame for display
+                    frame = display_frame
+
+                    # Calculate histogram and analyze lighting (for both modes)
+                    self.current_histogram = self.calculate_histogram(frame)
+                    lighting_analysis = self.analyze_lighting(frame, self.current_histogram)
 
                     # Generate live recommendations for real-time feedback
                     live_recs = None
                     if detection is not None:
-                        bbox, track_id, confidence, mask = detection
-                        live_recs = self.generate_recommendations(display_frame, bbox)
+                        if len(detection) == 4:
+                            bbox, track_id, confidence, mask = detection
+                        else:
+                            bbox, track_id, confidence = detection
+                            mask = None
+                        live_recs = self.generate_recommendations(frame, bbox)
 
                     # Draw UI with live recommendations and lighting analysis
-                    ui_frame = self.draw_ui(display_frame, detection, live_recs, lighting_analysis)
+                    ui_frame = self.draw_ui(frame, detection, live_recs, lighting_analysis)
                     cv2.imshow("Product Capture System", ui_frame)
 
                     # Handle keyboard
@@ -906,15 +955,16 @@ class CaptureSystem:
                             print("[WARNING] No object detected! Please ensure object is visible.")
                             continue
 
+                        # Unpack detection
                         bbox, track_id, confidence, mask = detection
 
                         # Generate recommendations
-                        self.recommendations = self.generate_recommendations(display_frame, bbox)
+                        self.recommendations = self.generate_recommendations(frame, bbox)
 
-                        # Store review data (use gamma-corrected frame if applied)
-                        self.review_frame = display_frame.copy()
+                        # Store review data
+                        self.review_frame = frame.copy()
                         self.review_bbox = bbox
-                        self.review_detection_info = detection
+                        self.review_detection_info = (bbox, track_id, confidence, mask)
                         self.review_mask = mask  # Store the segmentation mask
 
                         # Switch to REVIEW state
@@ -1023,7 +1073,7 @@ class CaptureSystem:
 
     def cleanup(self) -> None:
         """
-        Clean up resources (camera, windows, profiler, etc.).
+        Clean up resources (camera, windows, profiler, GStreamer pipeline, etc.).
         """
         # Stop profiling and generate report
         if self.profiler is not None:
@@ -1040,10 +1090,72 @@ class CaptureSystem:
                     json.dump(report, f, indent=2)
                 print(f"[INFO] Performance summary saved to: {perf_summary_file}")
 
-        if self.cap is not None:
+        # Release capture resources
+        if self.use_gstreamer and hasattr(self, 'gst_capture'):
+            print("[INFO] Releasing GStreamer capture...")
+            self.gst_capture.release()
+        elif self.cap is not None:
+            print("[INFO] Releasing OpenCV capture...")
             self.cap.release()
+
         cv2.destroyAllWindows()
         print("[INFO] Resources released. Goodbye!")
+
+    def _create_mock_results(self, detections: List[Dict], frame_shape: Tuple[int, int, int]):
+        """
+        Create mock YOLO results object for compatibility with existing code.
+        
+        Args:
+            detections: List of detection dictionaries from GStreamer
+            frame_shape: Shape of the frame (H, W, C)
+            
+        Returns:
+            Mock results object with boxes, masks attributes
+        """
+        class MockResults:
+            def __init__(self, detections, frame_shape):
+                self.detections = detections
+                self.boxes = None
+                self.masks = None
+                self.names = {}
+                
+                if detections:
+                    # Convert detections to box format
+                    self.boxes = MockBoxes(detections)
+                    self.names = {det['class_id']: det['class_name'] for det in detections}
+                    
+                    # Add masks if available
+                    if any(det.get('has_mask', False) for det in detections):
+                        self.masks = MockMasks(detections)
+        
+        class MockBoxes:
+            def __init__(self, detections):
+                self.detections = detections
+                
+            def cpu(self):
+                return self
+                
+            def numpy(self):
+                class MockBox:
+                    def __init__(self, detection):
+                        self.cls = [detection['class_id']]
+                        self.conf = [detection['confidence']]
+                        self.xyxy = [detection['bbox']]
+                
+                return [MockBox(det) for det in self.detections]
+        
+        class MockMasks:
+            def __init__(self, detections):
+                self.detections = detections
+                
+            def cpu(self):
+                return self
+                
+            def numpy(self):
+                # Return mock mask data
+                return [det.get('mask_shape', (480, 640)) for det in self.detections]
+        
+        return MockResults(detections, frame_shape)
 
     def get_session_metadata(self) -> Dict[str, Any]:
         """
@@ -1071,15 +1183,36 @@ def main():
     """
     Main entry point for the capture system.
     """
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Multi-view Product Capture System")
+    parser.add_argument("--camera", type=int, default=0, help="Camera ID")
+    parser.add_argument("--angles", type=int, default=3, help="Number of angles")
+    parser.add_argument("--model", default="yolov8n-seg.pt", help="YOLO model")
+    parser.add_argument("--output", default="captured_images", help="Output directory")
+    parser.add_argument("--no-gstreamer", action="store_true", help="Disable GStreamer")
+    parser.add_argument("--profiling", action="store_true", help="Enable profiling")
+    
+    args = parser.parse_args()
+    
     # Configuration parameters
-    TOTAL_ANGLES = 3
+    TOTAL_ANGLES = args.angles
     MIN_BBOX_AREA = 10000
-    CAMERA_ID = 0
-    OUTPUT_DIR = "captured_images"
-    MODEL_NAME = "yolov8n-seg.pt"  # Using segmentation model for background removal
+    CAMERA_ID = args.camera
+    OUTPUT_DIR = args.output
+    MODEL_NAME = args.model
+    USE_GSTREAMER = not args.no_gstreamer
 
-    # Performance profiling (set to True to enable GstShark profiling)
-    ENABLE_PROFILING = os.getenv("ENABLE_GSTSHARK_PROFILING", "false").lower() == "true"
+    # Performance profiling
+    ENABLE_PROFILING = args.profiling or os.getenv("ENABLE_GSTSHARK_PROFILING", "false").lower() == "true"
+
+    print(f"Starting capture system:")
+    print(f"  Camera ID: {CAMERA_ID}")
+    print(f"  Angles: {TOTAL_ANGLES}")
+    print(f"  Model: {MODEL_NAME}")
+    print(f"  Output: {OUTPUT_DIR}")
+    print(f"  GStreamer: {USE_GSTREAMER}")
+    print(f"  Profiling: {ENABLE_PROFILING}")
 
     # Create and run the capture system
     try:
@@ -1089,7 +1222,8 @@ def main():
             camera_id=CAMERA_ID,
             output_dir=OUTPUT_DIR,
             model_name=MODEL_NAME,
-            enable_profiling=ENABLE_PROFILING
+            enable_profiling=ENABLE_PROFILING,
+            use_gstreamer=USE_GSTREAMER
         )
 
         # Attach profiler to current process if enabled
