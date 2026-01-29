@@ -4,65 +4,43 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
 .venv/
 venv/
 ENV/
-env/
 
-# Environment Variables (IMPORTANT: Never commit API keys!)
-.env
+# Large model files
+libtorch/
+*.torchscript
+*.pt
+*.pth
+*.onnx
+
+# GStreamer build
+gstreamer_plugin_c/build/
+*.so
+
+# Captured data
+captured_images/
+gstshark_logs/
+gstshark_*/
+test_output/
+
+# Temporary files
+*.log
+*.tmp
+.cache/
+.pytest_cache/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# macOS
+# OS
 .DS_Store
+Thumbs.db
 
-# Captured Images (optional - uncomment if you don't want to track captured images)
-# captured_images/
-# *.jpg
-# *.jpeg
-# *.png
-
-# Logs
-logs/
-*.log
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# ChromaDB
-data/chroma_db/
-
-# YOLO models (optional - uncomment if you don't want to track model files)
-# *.pt
-
-# Temporary files
-*.tmp
-*.temp
+# Backup files
+*_backup*
+*.bak

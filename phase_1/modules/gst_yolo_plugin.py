@@ -1,8 +1,15 @@
-import gi
-gi.require_version('Gst', '1.0')
-gi.require_version('GstBase', '1.0')
+# Disable Python GStreamer YOLO plugin - use C++ plugin instead
+PLUGIN_ENABLED = False
 
-from gi.repository import Gst, GObject, GstBase
+if PLUGIN_ENABLED:
+    import gi
+    gi.require_version('Gst', '1.0')
+    gi.require_version('GstBase', '1.0')
+    from gi.repository import Gst, GObject, GstBase
+    Gst.init(None)
+else:
+    # Dummy imports for disabled plugin
+    Gst = None
 import numpy as np
 import cv2
 from typing import Optional, Dict, List, Any
@@ -16,36 +23,38 @@ except ImportError:
     print("[WARNING] Ultralytics YOLO not available. Install with: pip install ultralytics")
 
 
-# Initialize GStreamer
-Gst.init(None)
+if PLUGIN_ENABLED:
+    # Initialize GStreamer
+    Gst.init(None)
 
 
-class GstYoloInference(GstBase.BaseTransform):
-    # Plugin metadata
-    __gstmetadata__ = (
-        'YOLO Inference',
-        'Filter/Analyzer/Video',
-        'Performs YOLO object detection/segmentation on video frames',
-        'Product Capture System'
-    )
+if PLUGIN_ENABLED:
+    class GstYoloInference(GstBase.BaseTransform):
+        # Plugin metadata
+        __gstmetadata__ = (
+            'YOLO Inference',
+            'Filter/Analyzer/Video',
+            'Performs YOLO object detection/segmentation on video frames',
+            'Product Capture System'
+        )
 
-    # Pad templates
-    _sink_template = Gst.PadTemplate.new(
-        'sink',
-        Gst.PadDirection.SINK,
-        Gst.PadPresence.ALWAYS,
-        Gst.Caps.from_string('video/x-raw,format=RGB')
-    )
+        # Pad templates
+        _sink_template = Gst.PadTemplate.new(
+            'sink',
+            Gst.PadDirection.SINK,
+            Gst.PadPresence.ALWAYS,
+            Gst.Caps.from_string('video/x-raw,format=RGB')
+        )
 
-    _src_template = Gst.PadTemplate.new(
-        'src',
-        Gst.PadDirection.SRC,
-        Gst.PadPresence.ALWAYS,
-        Gst.Caps.from_string('video/x-raw,format=RGB')
-    )
+        _src_template = Gst.PadTemplate.new(
+            'src',
+            Gst.PadDirection.SRC,
+            Gst.PadPresence.ALWAYS,
+            Gst.Caps.from_string('video/x-raw,format=RGB')
+        )
 
-    # Register pad templates
-    __gsttemplates__ = (_sink_template, _src_template)
+        # Register pad templates
+        __gsttemplates__ = (_sink_template, _src_template)
 
     # Properties
     __gproperties__ = {
@@ -363,126 +372,216 @@ class GstYoloInference(GstBase.BaseTransform):
             return self.emit_metadata
 
 
-# Register element
-GObject.type_register(GstYoloInference)
+    # Register element (inside if PLUGIN_ENABLED block)
+    GObject.type_register(GstYoloInference)
+else:
+    # Dummy class when plugin is disabled
+    class GstYoloInference:
+        """Dummy class when plugin is disabled"""
+        pass
 
 
-def plugin_init(plugin):
-    """
-    Plugin initialization function.
-    Called by GStreamer to register elements.
-    """
-    # Get or register the type
-    try:
-        gtype = GObject.type_from_name("GstYoloInference")
-    except RuntimeError:
-        # Type not registered yet, register it
-        gtype = GObject.type_register(GstYoloInference)
-
-    # Register the element
-    return Gst.Element.register(plugin, "yoloinference", 0, gtype)
-
-
-def register_plugin():
-    """
-    Register the YOLO inference plugin with GStreamer.
-
-    This function should be called to make the plugin available to GStreamer.
-
-    Note: Python GStreamer bindings have limitations with plugin registration.
-    This uses a direct element factory registration approach.
-    """
-    try:
-        # Register the GObject type
+if PLUGIN_ENABLED:
+    def plugin_init(plugin):
+        """
+        Plugin initialization function.
+        Called by GStreamer to register elements.
+        """
+        # Get or register the type
         try:
             gtype = GObject.type_from_name("GstYoloInference")
         except RuntimeError:
+            # Type not registered yet, register it
             gtype = GObject.type_register(GstYoloInference)
 
-        # Create a simple plugin and register element
-        # This approach bypasses some Python binding limitations
-        result = Gst.Plugin.register_static(
-            Gst.VERSION_MAJOR,
-            Gst.VERSION_MINOR,
-            'yoloinference',
-            'YOLO inference plugin for GStreamer',
-            plugin_init,
-            '1.0',
-            'MIT',
-            'Product Capture System',
-            'Product Capture System',
-            'https://github.com/yourrepo'
-        )
+        # Register the element
+        return Gst.Element.register(plugin, "yoloinference", 0, gtype)
 
-        if not result:
-            # Fallback: Try direct registration (Python binding workaround)
-            print("[INFO] Trying alternative registration method...")
-            # This won't work with parse_launch, but element can be created directly
-            return gtype is not None
 
-        return result
+    def register_plugin():
+        """
+        Register the YOLO inference plugin with GStreamer.
 
-    except Exception as e:
-        print(f"[ERROR] Plugin registration failed: {e}")
-        import traceback
-        traceback.print_exc()
+        This function should be called to make the plugin available to GStreamer.
+
+        Note: Python GStreamer bindings have limitations with plugin registration.
+        This uses a direct element factory registration approach.
+        """
+        try:
+            # Register the GObject type
+            try:
+                gtype = GObject.type_from_name("GstYoloInference")
+            except RuntimeError:
+                gtype = GObject.type_register(GstYoloInference)
+
+            # Create a simple plugin and register element
+            # This approach bypasses some Python binding limitations
+            result = Gst.Plugin.register_static(
+                Gst.VERSION_MAJOR,
+                Gst.VERSION_MINOR,
+                'yoloinference',
+                'YOLO inference plugin for GStreamer',
+                plugin_init,
+                '1.0',
+                'MIT',
+                'Product Capture System',
+                'Product Capture System',
+                'https://github.com/yourrepo'
+            )
+
+            if not result:
+                # Fallback: Try direct registration (Python binding workaround)
+                print("[INFO] Trying alternative registration method...")
+                # This won't work with parse_launch, but element can be created directly
+                return gtype is not None
+
+            return result
+
+        except Exception as e:
+            print(f"[ERROR] Plugin registration failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+else:
+    # Dummy functions when plugin is disabled
+    def register_plugin():
+        """Dummy register_plugin when plugin is disabled"""
         return False
 
 
 class GstYoloManager:
     """
     Manager class for GStreamer YOLO plugin integration.
-    Provides easy interface for the capture system.
+    Supports both Python and C++ YOLO plugins.
     """
-    
+
     def __init__(self):
+        # Initialize GStreamer
+        try:
+            import gi
+            gi.require_version('Gst', '1.0')
+            from gi.repository import Gst as GstLib
+            GstLib.init(None)
+            self.Gst = GstLib
+            self.gst_available = True
+        except Exception as e:
+            print(f"[WARNING] GStreamer not available: {e}")
+            self.Gst = None
+            self.gst_available = False
+
         self.pipeline = None
         self.bus = None
+        self.appsink = None
         self.plugin_registered = False
         self.detections = []
         self.inference_stats = {'avg_time': 0, 'frame_count': 0}
-    
+        self.using_cpp_plugin = False
+
+        # Check if plugin is enabled
+        if not PLUGIN_ENABLED:
+            print("[INFO] GstYoloManager: Python plugin disabled, will try C++ plugin")
+
+    def _check_cpp_plugin_available(self) -> bool:
+        """Check if C++ yoloinference plugin is available."""
+        if not self.gst_available:
+            return False
+
+        try:
+            registry = self.Gst.Registry.get()
+            plugin = registry.find_plugin("yoloinference")
+            if plugin:
+                print(f"[INFO] Found C++ yoloinference plugin: {plugin.get_filename()}")
+                return True
+        except Exception as e:
+            print(f"[DEBUG] C++ plugin check error: {e}")
+        return False
+
     def register_plugin(self) -> bool:
-        """Register the YOLO plugin."""
+        """Register the YOLO plugin (Python or C++)."""
+        # First check for C++ plugin
+        if self._check_cpp_plugin_available():
+            print("[SUCCESS] C++ yoloinference plugin is available")
+            self.using_cpp_plugin = True
+            return True
+
+        # Try Python plugin if enabled
+        if not PLUGIN_ENABLED:
+            print("[INFO] Python plugin disabled, C++ plugin not found")
+            return False
+
         if not self.plugin_registered:
             self.plugin_registered = register_plugin()
             if self.plugin_registered:
-                print("[SUCCESS] GStreamer YOLO plugin registered")
+                print("[SUCCESS] GStreamer YOLO plugin registered (Python)")
             else:
                 print("[ERROR] Failed to register GStreamer YOLO plugin")
         return self.plugin_registered
-    
+
     def create_pipeline(self, camera_id: int = 0, model_path: str = "yolov8n-seg.pt",
                        confidence: float = 0.25, width: int = 1280, height: int = 720) -> bool:
         """
         Create GStreamer pipeline with YOLO inference.
-        
+        Supports both Python (.pt) and C++ (.torchscript) models.
+
         Args:
             camera_id: Camera device ID
-            model_path: Path to YOLO model
+            model_path: Path to YOLO model (.pt for Python, .torchscript for C++)
             confidence: Detection confidence threshold
             width: Frame width
             height: Frame height
-            
+
         Returns:
             bool: True if pipeline created successfully
         """
-        if not self.register_plugin():
+        if not self.gst_available:
+            print("[ERROR] GStreamer not available")
             return False
-        
+
+        if not self.register_plugin():
+            print("[ERROR] No YOLO plugin available (neither C++ nor Python)")
+            return False
+
         try:
-            # Create pipeline string
-            pipeline_str = (
-                f"v4l2src device=/dev/video{camera_id} ! "
-                f"image/jpeg, width={width}, height={height}, framerate=30/1 ! "
-                "jpegdec ! videoconvert ! video/x-raw,format=RGB ! "
-                f"yoloinference model-path={model_path} confidence={confidence} "
-                f"iou-threshold=0.45 device=auto annotate=true emit-metadata=true ! "
-                "videoconvert ! appsink name=sink emit-signals=true max-buffers=1 drop=true"
-            )
-            
-            print(f"[INFO] Creating GStreamer pipeline: {pipeline_str}")
-            self.pipeline = Gst.parse_launch(pipeline_str)
+            # Determine model path based on plugin type
+            if self.using_cpp_plugin:
+                # C++ plugin uses TorchScript models
+                import os
+                if model_path.endswith('.pt'):
+                    model_path = model_path.replace('.pt', '.torchscript')
+
+                # Use absolute path for C++ plugin
+                if not os.path.isabs(model_path):
+                    # Go up to project root: phase_1/modules -> phase_1 -> project_root
+                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    model_path = os.path.join(project_root, model_path)
+
+                print(f"[INFO] Using C++ plugin, model: {model_path}")
+
+                # Create pipeline for C++ plugin
+                pipeline_str = (
+                    f"v4l2src device=/dev/video{camera_id} ! "
+                    f"image/jpeg,width={width},height={height},framerate=30/1 ! "
+                    "jpegdec ! videoconvert ! video/x-raw,format=RGB ! "
+                    f"yoloinference model={model_path} confidence={confidence} "
+                    f"annotate=true ! "
+                    "videoconvert ! video/x-raw,format=BGR ! "
+                    "appsink name=sink emit-signals=true max-buffers=1 drop=true"
+                )
+            else:
+                # Python plugin
+                print(f"[INFO] Using Python plugin, model: {model_path}")
+                pipeline_str = (
+                    f"v4l2src device=/dev/video{camera_id} ! "
+                    f"image/jpeg, width={width}, height={height}, framerate=30/1 ! "
+                    "jpegdec ! videoconvert ! video/x-raw,format=RGB ! "
+                    f"yoloinference model-path={model_path} confidence={confidence} "
+                    f"iou-threshold=0.45 device=auto annotate=true emit-metadata=true ! "
+                    "videoconvert ! appsink name=sink emit-signals=true max-buffers=1 drop=true"
+                )
+
+            print(f"[INFO] Creating GStreamer pipeline...")
+            print(f"[DEBUG] Pipeline: {pipeline_str}")
+            self.pipeline = self.Gst.parse_launch(pipeline_str)
             
             # Get the appsink element
             self.appsink = self.pipeline.get_by_name('sink')
@@ -499,81 +598,100 @@ class GstYoloManager:
     
     def start_pipeline(self) -> bool:
         """Start the GStreamer pipeline."""
-        if not self.pipeline:
+        if not self.gst_available:
+            print("[ERROR] GStreamer not available")
             return False
-            
+
+        if not self.pipeline:
+            print("[ERROR] No pipeline to start")
+            return False
+
         try:
-            ret = self.pipeline.set_state(Gst.State.PLAYING)
-            if ret == Gst.StateChangeReturn.FAILURE:
+            ret = self.pipeline.set_state(self.Gst.State.PLAYING)
+            if ret == self.Gst.StateChangeReturn.FAILURE:
                 print("[ERROR] Failed to start pipeline")
                 return False
-            
-            print("[INFO] GStreamer pipeline started")
+
+            print(f"[INFO] GStreamer pipeline started (using {'C++' if self.using_cpp_plugin else 'Python'} plugin)")
             return True
-            
+
         except Exception as e:
             print(f"[ERROR] Error starting pipeline: {e}")
+            import traceback
+            traceback.print_exc()
             return False
-    
+
     def get_frame(self) -> Optional[np.ndarray]:
         """Get annotated frame from the pipeline."""
+        if not self.gst_available:
+            return None
+
         if not self.appsink:
             return None
-            
+
         try:
-            sample = self.appsink.try_pull_sample(Gst.SECOND)
+            # Use emit() for appsink signal-based sample pulling
+            sample = self.appsink.emit("pull-sample")
             if sample is None:
                 return None
-                
+
             buffer = sample.get_buffer()
             caps = sample.get_caps()
-            
+
             # Get frame dimensions
             struct = caps.get_structure(0)
             width = struct.get_value('width')
             height = struct.get_value('height')
-            
+
             # Map buffer to numpy array
-            success, map_info = buffer.map(Gst.MapFlags.READ)
+            success, map_info = buffer.map(self.Gst.MapFlags.READ)
             if not success:
                 return None
-                
+
             try:
-                # Convert to numpy array (RGB format)
+                # C++ plugin outputs BGR, Python outputs RGB
                 frame = np.ndarray(
                     shape=(height, width, 3),
                     dtype=np.uint8,
                     buffer=map_info.data
                 ).copy()
-                
+
+                # Convert BGR to RGB if using C++ plugin
+                if self.using_cpp_plugin:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
                 return frame
-                
+
             finally:
                 buffer.unmap(map_info)
-                
+
         except Exception as e:
             print(f"[ERROR] Error getting frame: {e}")
             return None
     
     def check_messages(self) -> List[Dict[str, Any]]:
-        """Check for YOLO detection messages."""
+        """Check for YOLO detection messages (Python plugin only)."""
         detections = []
-        
-        if not self.bus:
+
+        if not self.gst_available or not self.bus:
             return detections
-            
+
+        # C++ plugin doesn't emit metadata yet
+        if self.using_cpp_plugin:
+            return detections
+
         try:
             while True:
-                msg = self.bus.pop_filtered(Gst.MessageType.APPLICATION)
+                msg = self.bus.pop_filtered(self.Gst.MessageType.APPLICATION)
                 if msg is None:
                     break
-                    
+
                 struct = msg.get_structure()
                 if struct and struct.get_name() == 'yolo-inference':
                     metadata_json = struct.get_value('metadata')
                     metadata = json.loads(metadata_json)
                     detections.append(metadata)
-                    
+
                     # Update stats
                     self.inference_stats['frame_count'] = metadata['frame']
                     if metadata['inference_time_ms'] > 0:
@@ -582,27 +700,30 @@ class GstYoloManager:
                             self.inference_stats['avg_time'] = metadata['inference_time_ms']
                         else:
                             self.inference_stats['avg_time'] = (
-                                self.inference_stats['avg_time'] * 0.9 + 
+                                self.inference_stats['avg_time'] * 0.9 +
                                 metadata['inference_time_ms'] * 0.1
                             )
-                            
+
         except Exception as e:
             print(f"[ERROR] Error checking messages: {e}")
-            
+
         return detections
-    
+
     def stop_pipeline(self):
         """Stop and cleanup the pipeline."""
+        if not self.gst_available:
+            return
+
         if self.pipeline:
             try:
-                self.pipeline.set_state(Gst.State.NULL)
+                self.pipeline.set_state(self.Gst.State.NULL)
                 print("[INFO] GStreamer pipeline stopped")
             except Exception as e:
                 print(f"[ERROR] Error stopping pipeline: {e}")
-        
+
         if self.bus:
             self.bus.remove_signal_watch()
-            
+
         self.pipeline = None
         self.bus = None
         self.appsink = None
@@ -612,6 +733,10 @@ if __name__ == '__main__':
     # Test the plugin
     print("Testing GStreamer YOLO Plugin Manager")
     print("=" * 60)
+
+    if not PLUGIN_ENABLED:
+        print("[INFO] Plugin is disabled, cannot run test")
+        exit(0)
 
     manager = GstYoloManager()
     

@@ -221,18 +221,32 @@ class GStreamerCapture:
         self.confidence = confidence
         # Note: For runtime change, we'd need to recreate the pipeline
         # This would require stopping and restarting
-    
+
+    def get_frame(self) -> Optional[np.ndarray]:
+        """
+        Get frame (convenience method).
+
+        Returns:
+            Frame or None if failed
+        """
+        ret, frame, _ = self.read_frame()
+        return frame if ret else None
+
+    def stop_pipeline(self):
+        """Stop the pipeline (convenience method)."""
+        self.release()
+
     def release(self):
         """Release capture resources."""
         self.is_active = False
-        
+
         if not self.use_fallback and self.gst_manager:
             self.gst_manager.stop_pipeline()
-        
+
         if self.fallback_cap:
             self.fallback_cap.release()
             self.fallback_cap = None
-        
+
         print("[INFO] GStreamer capture system released")
 
 

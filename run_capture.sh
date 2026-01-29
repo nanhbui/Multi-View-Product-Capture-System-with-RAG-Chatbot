@@ -1,49 +1,27 @@
 #!/bin/bash
-#
-# Run Product Capture System (Original - Full Features)
-#
+# Script to run capture system with proper virtual environment
 
-echo "=========================================
-"
-echo "Product Capture System - Full Featured"
-echo "=========================================
-"
+echo "========================================="
+echo "Starting Product Capture System"
+echo "========================================="
 echo ""
 
-# Apply CPU optimizations
-export OMP_NUM_THREADS=4
-export MKL_NUM_THREADS=4
+# Activate virtual environment
+echo "[1] Activating virtual environment..."
+source .venv/bin/activate
 
-echo "Features:"
-echo "  ✓ Multi-angle capture (3 angles)"
-echo "  ✓ YOLOv8 segmentation with masks"
-echo "  ✓ Real-time UI with histogram"
-echo "  ✓ Quality assessment (IQA)"
-echo "  ✓ MongoDB storage"
-echo "  ✓ Review mode"
-echo "  ✓ GStreamer video pipeline"
-echo ""
-echo "Controls:"
-echo "  S - Capture current frame"
-echo "  Enter - Confirm capture"
-echo "  R - Retake"
-echo "  Q - Quit"
-echo ""
-echo "Starting..."
-echo "=========================================
-"
-echo ""
-
-# Run capture system
-uv run python phase_1/capture_system.py
-
-exit_code=$?
+# Check packages
+echo "[2] Checking YOLO installation..."
+python -c "from ultralytics import YOLO; print('✅ Ultralytics YOLO available')" 2>/dev/null || echo "❌ YOLO not found!"
 
 echo ""
-echo "=========================================
-"
-echo "System stopped (exit code: $exit_code)"
-echo "=========================================
-"
+echo "[3] Starting capture system..."
+echo "========================================="
+echo ""
 
-exit $exit_code
+# Run capture system (disable GStreamer, use pure OpenCV + YOLO)
+cd phase_1
+python capture_system.py --angles 3 --no-gstreamer "$@"
+
+# Deactivate on exit
+deactivate
