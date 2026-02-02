@@ -167,22 +167,32 @@ class ProductRAGChatbot:
 
         # Create classification prompt
         classification_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a highly precise scope classifier for a specialized product information chatbot.
+            ("system", """You are a scope classifier for a product information chatbot that has captured and stored specific products.
 
-Product Context: {product_context} (This context refers to the **specific physical product** that was recently photographed, analyzed, and stored in our database, such as "Artificial flower arrangement in a ceramic vase.")
+Product Context: {product_context}
 
-Your task is to determine if the user's query is **DIRECTLY RELATED** to this specific product's identity, physical features, extracted characteristics, specifications, or the metadata gathered during the capture process.
+The database contains captured products with detailed information. Your task is to classify if the query relates to products/database.
 
-**IN_SCOPE EXAMPLES (Must be classified as 'in_scope'):**
-- Identifying the object: "What is that?", "Tell me what product this is."
-- Asking about features: "What colors are the flowers?", "What material is the vase made of?"
-- Asking about data: "What was the final confidence score for this capture?", "Did the system find a brand name?"
+**CLASSIFICATION RULES:**
+1. **IN_SCOPE** - Questions about:
+   - ANY product mentioned (phone case, vase, electronics, etc.) - likely refers to captured products
+   - Product features, usage, description, characteristics  
+   - Database content, captured data, system information
+   - Shopping/purchasing queries, finding similar products
+   - Web search for products or comparisons
 
-**OUT_OF_SCOPE EXAMPLES (Must be classified as 'out_of_scope'):**
-- General knowledge: "What is the capital of France?", "Tell me about the history of flowers."
-- External topics: "What is the weather like today?", "What time is it?"
+2. **OUT_OF_SCOPE** - Only for:
+   - Weather, politics, personal information
+   - Completely unrelated topics
 
-IMPORTANT: Be strict but accurate. If the user asks about the object's identity, classify it as IN_SCOPE.
+**CRITICAL:** If user mentions any product type (like "phone case"), assume it refers to captured data and classify as IN_SCOPE.
+
+**EXAMPLES:**
+- "What is phone case, tell me usage" → IN_SCOPE (asking about captured phone case product)
+- "Describe this product" → IN_SCOPE 
+- "What's the weather?" → OUT_OF_SCOPE
+
+IMPORTANT: Be very permissive for any product-related queries.
 
 Respond ONLY in the required JSON format:
 {{
@@ -263,6 +273,46 @@ Respond ONLY in the required JSON format:
             state.workflow_complete = True
             return "end"
 
+    def _should_use_tavily_search(self, user_query: str, rag_results: List[RetrievalResult]) -> bool:
+        """
+        Determine if Tavily search should be used based on query content and RAG quality
+        
+        Args:
+            user_query: User's query string
+            rag_results: Results from RAG search
+            
+        Returns:
+            True if Tavily search should be triggered
+        """
+        query_lower = user_query.lower()
+        
+        # Keywords that indicate need for external search
+        external_keywords = [
+            'online', 'buy', 'purchase', 'shop', 'store', 'website', 'link',
+            'similar', 'alternative', 'where to find', 'price', 'cost',
+            'amazon', 'ebay', 'website', 'url', 'shopping', 'similar products'
+        ]
+        
+        # Check if query contains external search keywords
+        has_external_intent = any(keyword in query_lower for keyword in external_keywords)
+        
+        if has_external_intent:
+            print(f"[DECISION] Triggering Tavily search due to external intent keywords")
+            return True
+            
+        # Check RAG result quality
+        if rag_results:
+            avg_score = sum(r.similarity_score for r in rag_results) / len(rag_results)
+            if avg_score < 0.5:  # Low similarity threshold
+                print(f"[DECISION] Triggering Tavily search due to low RAG quality: {avg_score:.3f}")
+                return True
+        else:
+            print(f"[DECISION] Triggering Tavily search due to no RAG results")
+            return True
+            
+        print(f"[DECISION] Using RAG only - sufficient quality results")
+        return False
+
     def _retrieval_and_tools_node(self, state: AgentState) -> AgentState:
         """
         Node B: Retrieval & Tool Calling
@@ -335,16 +385,8 @@ Respond ONLY in the required JSON format:
             ))
 
         # Step 2: Determine if external search is needed
-        # Trigger Tavily if RAG results are low quality or insufficient
-        # DISABLED: Always use vector store only, never fall back to Tavily
-        needs_external = False
-
-        # Original logic (commented out):
-        # if state.rag_results:
-        #     avg_score = sum(r.similarity_score for r in state.rag_results) / len(state.rag_results)
-        #     needs_external = avg_score < 0.5  # Low similarity threshold
-        # else:
-        #     needs_external = True
+        # Trigger Tavily for shopping, similarity, or external queries
+        needs_external = self._should_use_tavily_search(user_query, state.rag_results)
 
         # Step 3: Optional Tavily External Search
         if needs_external and self.tavily_search:
@@ -418,10 +460,10 @@ Your role is to answer user questions about products based on the provided conte
 
 IMPORTANT INSTRUCTIONS:
 1. Use the context provided to answer the question accurately
-2. If the context doesn't contain enough information, acknowledge this
-3. Be concise but informative
-4. If multiple sources are provided, synthesize the information
-5. Always be helpful and professional
+2. If external web results are provided, prioritize them for shopping/purchase queries
+3. For shopping queries, provide specific links and purchasing information when available
+4. Synthesize information from both database and web sources when relevant
+5. Be concise but informative and always helpful
 
 Context:
 {context}"""),
@@ -551,6 +593,10 @@ Context:
 
             except KeyboardInterrupt:
                 print("\n\n[INFO] Chat interrupted. Goodbye!")
+                break
+            
+            except EOFError:
+                print("\n[INFO] Input ended. Goodbye!")
                 break
 
             except Exception as e:
